@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>多选精练·一题一答｜错题本自动收录</title>
+    <title>多选精练·记忆版｜自动保存进度+错题本</title>
     <style>
         * {
             margin: 0;
@@ -78,6 +78,13 @@
         }
         .btn-clear:hover {
             background: #fdd8d6;
+        }
+        .memory-tip {
+            font-size: 0.7rem;
+            background: #eef2ff;
+            border-radius: 20px;
+            padding: 4px 12px;
+            color: #1f5e8c;
         }
 
         /* tab */
@@ -284,13 +291,14 @@
 <div class="app-container">
     <div class="hero">
         <div class="title">
-            <h1>📚 多选专项 · 精准刷题</h1>
-            <p>每题提交即见正确答案 · 错题自动收录</p>
+            <h1>📚 多选专项 · 记忆刷题</h1>
+            <p>每题提交即见正确答案 | 自动保存进度 & 错题本</p>
         </div>
         <div class="stats">
             <span class="badge" id="totalCount">0题</span>
             <span class="badge wrong-badge" id="wrongCount">📘 错题 0</span>
             <button id="clearWrongBtn" class="btn-clear">🗑 清空错题本</button>
+            <span class="memory-tip">💾 自动记忆刷题位置</span>
         </div>
     </div>
 
@@ -314,7 +322,7 @@
             </div>
         </div>
     </div>
-    <footer>✅ 多选题需完全匹配正确答案（选项顺序无关）。每次提交会显示完整正确答案（含选项内容），错误题目自动加入错题库。</footer>
+    <footer>✅ 多选题完全匹配正确答案（选项顺序无关）。每次提交显示完整正确答案，错误自动进入错题库。<br>⚡ 当前进度、错题本、界面模式都会自动保存，刷新或下次访问继续刷题。</footer>
 </div>
 
 <script>
@@ -423,24 +431,30 @@
         { id:815, text:"在选择ETL数据整合工具时，需要考虑的特性有（）。", opts:{A:"数据源和目标系统的兼容性",B:"数据转换能力",C:"工具的颜色主题",D:"良好的集成性和开放性"}, ans:["A","B","D"] }
     ];
 
-    // ---------- 错题管理 ----------
+    // ---------- 记忆存储 KEY ----------
+    const STORAGE_KEYS = {
+        WRONG_SET: "multichoice_wrong_ids_v2",
+        CURRENT_MODE: "multichoice_current_mode",
+        CURRENT_INDEX: "multichoice_current_index"
+    };
+
+    // 错题管理
     let wrongSet = new Set();
 
     function loadWrongSet() {
-        const stored = localStorage.getItem("multichoice_wrong_ids");
+        const stored = localStorage.getItem(STORAGE_KEYS.WRONG_SET);
         if(stored) {
-            try { wrongSet = new Set(JSON.parse(stored)); } catch(e) {}
+            try { wrongSet = new Set(JSON.parse(stored)); } catch(e) { wrongSet = new Set(); }
         }
         updateStatsUI();
     }
     function saveWrongSet() {
-        localStorage.setItem("multichoice_wrong_ids", JSON.stringify([...wrongSet]));
+        localStorage.setItem(STORAGE_KEYS.WRONG_SET, JSON.stringify([...wrongSet]));
         updateStatsUI();
     }
     function updateStatsUI() {
         document.getElementById("totalCount").innerText = `${FULL_QUIZ.length}题`;
         document.getElementById("wrongCount").innerHTML = `📘 错题 ${wrongSet.size}`;
-        // 如果处于错题本模式，重新渲染
         if(currentMode === "wrong") renderWrongBook();
     }
     function markWrong(qid, isWrong) {
@@ -452,7 +466,7 @@
         saveWrongSet();
     }
 
-    // 获取完整正确答案文本 (字母+内容)
+    // 获取完整正确答案文本
     function getFullCorrectAnswer(question) {
         return question.ans.map(letter => `${letter}. ${question.opts[letter]}`).join("  ；  ");
     }
@@ -461,7 +475,28 @@
     let currentIndex = 0;
     let currentMode = "quiz";   // quiz / wrong
 
-    // 渲染刷题卡片 (当前题目)
+    // ---------- 记忆保存 ----------
+    function saveCurrentState() {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_MODE, currentMode);
+        if(currentMode === "quiz") {
+            localStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, currentIndex);
+        } else {
+            // 错题本模式不记忆刷题索引，但为了下次切回保留上次刷题进度，我们依然存储最后一次quiz的索引，不影响错题本
+            localStorage.setItem(STORAGE_KEYS.CURRENT_INDEX, currentIndex);
+        }
+    }
+
+    function loadSavedState() {
+        const savedMode = localStorage.getItem(STORAGE_KEYS.CURRENT_MODE);
+        const savedIndex = localStorage.getItem(STORAGE_KEYS.CURRENT_INDEX);
+        if(savedMode === "quiz" || savedMode === "wrong") currentMode = savedMode;
+        if(savedIndex !== null && !isNaN(parseInt(savedIndex))) {
+            let idx = parseInt(savedIndex);
+            if(idx >= 0 && idx < FULL_QUIZ.length) currentIndex = idx;
+        }
+    }
+
+    // 渲染刷题卡片
     function renderQuizCard() {
         if(currentMode !== "quiz") return;
         const q = FULL_QUIZ[currentIndex];
@@ -483,7 +518,6 @@
         document.getElementById("dynamicArea").innerHTML = dynamicHtml;
         document.getElementById("questionCounter").innerHTML = `第 ${currentIndex+1} / ${FULL_QUIZ.length} 题`;
 
-        // 绑定提交事件
         const submitBtn = document.getElementById("submitBtn");
         if(submitBtn) {
             submitBtn.onclick = () => {
@@ -493,7 +527,6 @@
                 const sortedUser = [...selected].sort();
                 const isCorrect = JSON.stringify(sortedCorrect) === JSON.stringify(sortedUser);
                 markWrong(q.id, !isCorrect);
-
                 const fullCorrectText = getFullCorrectAnswer(q);
                 const fbDiv = document.getElementById("feedbackArea");
                 if(isCorrect) {
@@ -504,8 +537,10 @@
                     fbDiv.className = "feedback wrong";
                 }
                 updateStatsUI();
+                saveCurrentState();
             };
         }
+        saveCurrentState();
     }
 
     // 错题本渲染
@@ -531,7 +566,6 @@
         });
         listHtml += `</div>`;
         document.getElementById("mainContent").innerHTML = listHtml;
-        // 绑定练习按钮
         document.querySelectorAll(".btn-practice").forEach(btn => {
             btn.addEventListener("click", (e) => {
                 const qid = parseInt(btn.getAttribute("data-id"));
@@ -539,18 +573,17 @@
                 if(targetIdx !== -1) {
                     currentMode = "quiz";
                     currentIndex = targetIdx;
-                    // 切换UI tab样式并重新渲染主卡片
+                    saveCurrentState();
                     document.querySelector(".mode-btn[data-mode='quiz']").click();
                 }
             });
         });
     }
 
-    // 切换模式入口
     function switchToMode(mode) {
         currentMode = mode;
+        saveCurrentState();
         if(mode === "quiz") {
-            // 恢复刷题面板结构
             document.getElementById("mainContent").innerHTML = `
                 <div class="quiz-card" id="quizPanel">
                     <div class="progress-bar">
@@ -568,7 +601,6 @@
         } else {
             renderWrongBook();
         }
-        // 更新tab激活样式
         document.querySelectorAll(".mode-btn").forEach(btn => btn.classList.remove("active"));
         document.querySelector(`.mode-btn[data-mode='${mode}']`).classList.add("active");
         updateStatsUI();
@@ -583,7 +615,8 @@
                 if(currentIndex > 0) currentIndex--;
                 else currentIndex = FULL_QUIZ.length - 1;
                 renderQuizCard();
-                bindNavEvents(); // 重新绑定（因为render会刷新DOM）
+                bindNavEvents();
+                saveCurrentState();
             };
         }
         if(nextBtn) {
@@ -593,6 +626,7 @@
                 else currentIndex = 0;
                 renderQuizCard();
                 bindNavEvents();
+                saveCurrentState();
             };
         }
     }
@@ -603,20 +637,21 @@
         saveWrongSet();
         if(currentMode === "wrong") renderWrongBook();
         else updateStatsUI();
+        saveCurrentState();
     });
 
-    // 初始化
+    // 初始化：加载记忆+构建UI
     function init() {
         loadWrongSet();
+        loadSavedState();
         // 注册模式切换
         document.querySelectorAll(".mode-btn").forEach(btn => {
             btn.addEventListener("click", (e) => {
                 const mode = btn.getAttribute("data-mode");
-                if(mode === "quiz") switchToMode("quiz");
-                else switchToMode("wrong");
+                switchToMode(mode);
             });
         });
-        switchToMode("quiz");
+        switchToMode(currentMode);
     }
     init();
 </script>
